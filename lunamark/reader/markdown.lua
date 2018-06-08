@@ -8,9 +8,9 @@ local lower, upper, gsub, rep, gmatch, format, length =
   string.lower, string.upper, string.gsub, string.rep, string.gmatch,
   string.format, string.len
 local concat = table.concat
-local P, R, S, V, C, Ct, Cg, Cb, Cmt, Cc, Cf, Cs, B =
-  lpeg.P, lpeg.R, lpeg.S, lpeg.V, lpeg.C, lpeg.Ct, lpeg.Cg, lpeg.Cb,
-  lpeg.Cmt, lpeg.Cc, lpeg.Cf, lpeg.Cs, lpeg.B
+local P, R, S, V, C, Cg, Cb, Cmt, Cc, Cf, Ct, B, Cs =
+  lpeg.P, lpeg.R, lpeg.S, lpeg.V, lpeg.C, lpeg.Cg, lpeg.Cb,
+  lpeg.Cmt, lpeg.Cc, lpeg.Cf, lpeg.Ct, lpeg.B, lpeg.Cs
 local lpegmatch = lpeg.match
 local expand_tabs_in_line = util.expand_tabs_in_line
 local unicode = require("unicode")
@@ -18,10 +18,12 @@ local utf8 = unicode.utf8
 
 local M = {}
 
+local rope_to_string = util.rope_to_string
+
 -- Normalize a markdown reference tag.  (Make lowercase, and collapse
 -- adjacent whitespace characters.)
 local function normalize_tag(tag)
-  return utf8.lower(gsub(tag, "[ \n\r\t]+", " "))
+  return utf8.lower(gsub(rope_to_string(tag), "[ \n\r\t]+", " "))
 end
 
 --- Create a new markdown parser.
@@ -60,12 +62,12 @@ end
 --     `definition_lists`
 --     :   Enable definition lists as in pandoc.
 --
---    `pandoc_title_blocks`
---    :    Parse pandoc-style title block at the beginning of document:
+--     `pandoc_title_blocks`
+--     :   Parse pandoc-style title block at the beginning of document:
 --
---            % Title
---            % Author1; Author2
---            % Date
+--             % Title
+--             % Author1; Author2
+--             % Date
 --
 --     `lua_metadata`
 --     :   Enable lua metadata.  This is an HTML comment block
@@ -75,6 +77,18 @@ end
 --         The function `markdown` (also `m`) is defined and can
 --         be used to ensure that string fields are parsed
 --         as markdown; otherwise, they will be read literally.
+--
+--     `require_blank_before_blockquote`
+--     :   Require a blank line between a paragraph and a following
+--         block quote.
+--
+--     `require_blank_before_header`
+--     :   Require a blank line between a paragraph and a following
+--         header.
+--
+--     `hash_enumerators`
+--     :   Allow `#` instead of a digit for an ordered list enumerator
+--         (equivalent to `1`).
 --
 -- *   Returns a converter function that converts a markdown string
 --     using `writer`, returning the parsed document as first result,
@@ -86,11 +100,15 @@ function M.new(writer, options)
   local options = options or {}
 
   local function expandtabs(s)
-    if not options.preserve_tabs and s:find("\t") then
+    if s:find("\t") then
       return s:gsub("[^\n]*",expand_tabs_in_line)
     else
       return s
     end
+  end
+
+  if options.preserve_tabs then
+    expandtabs = function(s) return s end
   end
 
   ------------------------------------------------------------------------------
@@ -113,6 +131,15 @@ function M.new(writer, options)
       local res = lpegmatch(inlines, str)
       if res == nil
         then error(format("parse_inlines failed on:\n%s", str:sub(1,20)))
+        else return res
+        end
+    end
+
+  parse_inlines_no_link =
+    function(str)
+      local res = lpegmatch(inlines_no_link, str)
+      if res == nil
+        then error(format("parse_inlines_no_link failed on:\n%s", str:sub(1,20)))
         else return res
         end
     end
@@ -231,12 +258,18 @@ function M.new(writer, options)
                      + space * space * space * bulletchar * #spacing
                      ) * -bulletchar
 
-  local enumerator = C(digit^3 * period) * #spacing
-                   + C(digit^2 * period) * #spacing * (tab + space^1)
-                   + C(digit * period) * #spacing * (tab + space^-2)
-                   + space * C(digit^2 * period) * #spacing
-                   + space * C(digit * period) * #spacing * (tab + space^-1)
-                   + space * space * C(digit^1 * period) * #spacing
+  if options.hash_enumerators then
+    dig = digit + hash
+  else
+    dig = digit
+  end
+
+  local enumerator = C(dig^3 * period) * #spacing
+                   + C(dig^2 * period) * #spacing * (tab + space^1)
+                   + C(dig * period) * #spacing * (tab + space^-2)
+                   + space * C(dig^2 * period) * #spacing
+                   + space * C(dig * period) * #spacing * (tab + space^-1)
+                   + space * space * C(dig^1 * period) * #spacing
 
   -----------------------------------------------------------------------------
   -- Parsers used for markdown code spans
@@ -319,16 +352,19 @@ function M.new(writer, options)
 
   -- like indirect_link
   local function lookup_note(ref)
-    local found = rawnotes[normalize_tag(ref)]
-    if found then
-      return writer.note(parse_blocks(found))
-    else
-      return "[^" .. ref .. "]"
+    return function()
+      local found = rawnotes[normalize_tag(ref)]
+      if found then
+        return writer.note(parse_blocks(found))
+      else
+        return {"[^", ref, "]"}
+      end
     end
   end
 
   local function register_note(ref,rawnote)
     rawnotes[normalize_tag(ref)] = rawnote
+    return ""
   end
 
   local RawNoteRef = #(lbracket * circumflex) * tag / strip_first_char
@@ -338,7 +374,8 @@ function M.new(writer, options)
   local NoteBlock
 
   if options.notes then
-    NoteBlock = nonindentspace * RawNoteRef * colon * spnl * indented_blocks(chunk)
+    NoteBlock = leader * RawNoteRef * colon * spnl * indented_blocks(chunk)
+              / register_note
   else
     NoteBlock = fail
   end
@@ -353,11 +390,12 @@ function M.new(writer, options)
   -- add a reference to the list
   local function register_link(tag,url,title)
       references[normalize_tag(tag)] = { url = url, title = title }
+      return ""
   end
 
   -- parse a reference definition:  [foo]: /bar "title"
   local define_reference_parser =
-    leader * tag * colon * spacechar^0 * url * optionaltitle * blankline^0
+    leader * tag * colon * spacechar^0 * url * optionaltitle * blankline^1
 
   local referenceparser =
     -- need the Ct or we get a stack overflow
@@ -366,9 +404,9 @@ function M.new(writer, options)
        + nonemptyline^1
        + blankline^1)^0)
 
-  -- lookup link reference and return either a link or image.
-  -- if the reference is not found, return the bracketed label.
-  local function indirect_link(img,label,sps,tag)
+  -- lookup link reference and return either
+  -- the link or nil and fallback text.
+  local function lookup_reference(label,sps,tag)
       local tagpart
       if not tag then
           tag = label
@@ -377,32 +415,44 @@ function M.new(writer, options)
           tag = label
           tagpart = "[]"
       else
-          tagpart = "[" .. parse_inlines(tag) .. "]"
+          tagpart = {"[", parse_inlines(tag), "]"}
       end
       if sps then
-        tagpart = sps .. tagpart
+        tagpart = {sps, tagpart}
       end
       local r = references[normalize_tag(tag)]
-      if r and img then
-        return writer.image(parse_inlines(label), r.url, r.title)
-      elseif r and not img then
-        return writer.link(parse_inlines(label), r.url, r.title)
+      if r then
+        return r
       else
-        return ("[" .. parse_inlines(label) .. "]" .. tagpart)
+        return nil, {"[", parse_inlines(label), "]", tagpart}
       end
   end
 
-  local function direct_link(img,label,url,title)
-    if img then
-      return writer.image(label,url,title)
-    else
-      return writer.link(label,url,title)
+  -- lookup link reference and return a link, if the reference is found,
+  -- or a bracketed label otherwise.
+  local function indirect_link(label,sps,tag)
+    return function()
+      local r,fallback = lookup_reference(label,sps,tag)
+      if r then
+        return writer.link(parse_inlines_no_link(label), r.url, r.title)
+      else
+        return fallback
+      end
     end
   end
 
-  -- parse an exclamation mark and return true, or return false
-  local image_marker = Cc(true) * exclamation
-                     + Cc(false)
+  -- lookup image reference and return an image, if the reference is found,
+  -- or a bracketed label otherwise.
+  local function indirect_image(label,sps,tag)
+    return function()
+      local r,fallback = lookup_reference(label,sps,tag)
+      if r then
+        return writer.image(writer.string(label), r.url, r.title)
+      else
+        return {"!", fallback}
+      end
+    end
+  end
 
   ------------------------------------------------------------------------------
   -- HTML
@@ -422,16 +472,19 @@ function M.new(writer, options)
 
   local block_keyword =
       keyword_exact("address") + keyword_exact("blockquote") +
-      keyword_exact("center") + keyword_exact("dir") + keyword_exact("div") +
+      keyword_exact("center") + keyword_exact("del") +
+      keyword_exact("dir") + keyword_exact("div") +
       keyword_exact("p") + keyword_exact("pre") + keyword_exact("li") +
       keyword_exact("ol") + keyword_exact("ul") + keyword_exact("dl") +
       keyword_exact("dd") + keyword_exact("form") + keyword_exact("fieldset") +
-      keyword_exact("isindex") + keyword_exact("menu") + keyword_exact("noframes") +
+      keyword_exact("isindex") + keyword_exact("ins") +
+      keyword_exact("menu") + keyword_exact("noframes") +
       keyword_exact("frameset") + keyword_exact("h1") + keyword_exact("h2") +
       keyword_exact("h3") + keyword_exact("h4") + keyword_exact("h5") +
       keyword_exact("h6") + keyword_exact("hr") + keyword_exact("script") +
-      keyword_exact("noscript") + keyword_exact("table") + keyword_exact("tbody") +
-      keyword_exact(  "tfoot") + keyword_exact("thead") + keyword_exact("th") +
+      keyword_exact("noscript") + keyword_exact("table") +
+      keyword_exact("tbody") + keyword_exact("tfoot") +
+      keyword_exact("thead") + keyword_exact("th") +
       keyword_exact("td") + keyword_exact("tr")
 
   -- There is no reason to support bad html, so we expect quoted attributes
@@ -517,14 +570,14 @@ function M.new(writer, options)
                   + P("--") * -dash / writer.ndash
                   + P("-") * #digit * B(digit, 2) / writer.ndash
 
-  local DoubleQuoted = dquote * Cs((Inline - dquote)^1) * dquote
+  local DoubleQuoted = dquote * Ct((Inline - dquote)^1) * dquote
                      / writer.doublequoted
 
   local squote_start = squote * -spacing
 
   local squote_end = squote * B(nonspacechar, 2)
 
-  local SingleQuoted = squote_start * Cs((Inline - squote_end)^1) * squote_end
+  local SingleQuoted = squote_start * Ct((Inline - squote_end)^1) * squote_end
                      / writer.singlequoted
 
   local Apostrophe = squote * B(nonspacechar, 2) / "’"
@@ -535,14 +588,24 @@ function M.new(writer, options)
 
   local Code      = inticks / writer.code
 
+  local bqstart      = more
+  local headerstart  = hash
+                     + (line * (equal^1 + dash^1) * optionalspace * newline)
+
+  if options.require_blank_before_blockquote then
+    bqstart = fail
+  end
+
+  if options.require_blank_before_header then
+    headerstart = fail
+  end
+
   local Endline   = newline * -( -- newline, but not before...
                         blankline -- paragraph break
                       + tightblocksep  -- nested list
                       + eof       -- end of document
-                      + more      -- blockquote
-                      + hash      -- atx header
-                      + ( line * (equal^1 + dash^1)
-                        * optionalspace * newline )  -- setext header
+                      + bqstart
+                      + headerstart
                     ) * spacechar^0 / writer.space
 
   local Space     = spacechar^2 * Endline / writer.linebreak
@@ -552,7 +615,7 @@ function M.new(writer, options)
   -- parse many p between starter and ender
   local function between(p, starter, ender)
       local ender2 = B(nonspacechar) * ender
-      return (starter * #nonspacechar * Cs(p * (p - ender2)^0) * ender2)
+      return (starter * #nonspacechar * Ct(p * (p - ender2)^0) * ender2)
   end
 
   local Strong = ( between(Inline, doubleasterisks, doubleasterisks)
@@ -575,22 +638,31 @@ function M.new(writer, options)
                       * more
                       / function(email) return writer.link(writer.string(email),"mailto:"..email) end
 
-  local DirectLink    = image_marker 
+  local DirectLink    = (tag / parse_inlines_no_link)  -- no links inside links
+                      * spnl
+                      * lparent
+                      * (url + Cc(""))  -- link can be empty [foo]()
+                      * optionaltitle
+                      * rparent
+                      / writer.link
+
+  local IndirectLink = tag * (C(spnl) * tag)^-1 / indirect_link
+
+  -- parse a link or image (direct or indirect)
+  local Link          = DirectLink + IndirectLink
+
+  local DirectImage   = exclamation
                       * (tag / parse_inlines)
                       * spnl
                       * lparent
                       * (url + Cc(""))  -- link can be empty [foo]()
                       * optionaltitle
                       * rparent
-                      / direct_link
+                      / writer.image
 
-   local IndirectLink = image_marker
-                      * tag
-                      * (C(spnl) * tag)^-1
-                      / indirect_link
+  local IndirectImage  = exclamation * tag * (C(spnl) * tag)^-1 / indirect_image
 
-  -- parse a link or image (direct or indirect)
-  local Link          = DirectLink + IndirectLink
+  local Image         = DirectImage + IndirectImage
 
   -- avoid parsing long strings of * or _ as emph/strong
   local UlOrStarLine  = asterisk^4 + underscore^4 / writer.string
@@ -617,13 +689,13 @@ function M.new(writer, options)
 
   -- strip off leading > and indents, and run through blocks
   local Blockquote     = Cs((
-            ((nonindentspace * more * space^-1)/"" * linechar^0 * newline)^1
+            ((leader * more * space^-1)/"" * linechar^0 * newline)^1
           * (-blankline * linechar^1 * newline)^0
           * blankline^0
           )^1) / parse_blocks / writer.blockquote
 
   local function lineof(c)
-      return (nonindentspace * (P(c) * optionalspace)^3 * newline * blankline^1)
+      return (leader * (P(c) * optionalspace)^3 * newline * blankline^1)
   end
 
   local HorizontalRule = ( lineof(asterisk)
@@ -631,12 +703,16 @@ function M.new(writer, options)
                          + lineof(underscore)
                          ) / writer.hrule
 
-  local Reference      = define_reference_parser / ""
+  local Reference      = define_reference_parser / register_link
 
-  local Paragraph      = nonindentspace * Cs(Inline^1) * newline * blankline^1
+  local Paragraph      = nonindentspace * Ct(Inline^1) * newline
+                       * ( blankline^1
+                         + #hash
+                         + #(leader * more * space^-1)
+                         )
                        / writer.paragraph
 
-  local Plain          = nonindentspace * Cs(Inline^1) / writer.plain
+  local Plain          = nonindentspace * Ct(Inline^1) / writer.plain
 
   ------------------------------------------------------------------------------
   -- Lists
@@ -677,7 +753,7 @@ function M.new(writer, options)
 
   local function ordered_list(s,tight,startnum)
     if options.startnum then
-      startnum = tonumber(listtype)
+      startnum = tonumber(listtype) or 1  -- fallback for '#'
     else
       startnum = nil
     end
@@ -758,7 +834,7 @@ function M.new(writer, options)
     * C((anyescaped - newline - semicolon)^0)
     * (semicolon + newline)
   local pandoc_authors =
-    percent * Ct((pandoc_author / parse_inlines)^0) * newline^-1
+    percent * Cs((pandoc_author / parse_inlines)^0) * newline^-1
   local pandoc_date =
     percent * optionalspace * C(line) / parse_inlines
   local pandoc_title_block =
@@ -773,8 +849,8 @@ function M.new(writer, options)
 
   local Blank          = blankline / ""
                        + LuaMeta
-                       + NoteBlock / ""
-                       + Reference / ""
+                       + NoteBlock
+                       + Reference
                        + (tightblocksep / "\n")
 
   ------------------------------------------------------------------------------
@@ -800,7 +876,7 @@ function M.new(writer, options)
 
   -- parse setext header
   local SetextHeader = #(line * S("=-"))
-                     * Cs(line / parse_inlines)
+                     * Ct(line / parse_inlines)
                      * HeadingLevel
                      * optionalspace * newline
                      / writer.header
@@ -814,7 +890,7 @@ function M.new(writer, options)
 
       Blocks                = Blank^0 *
                               Block^-1 *
-                              (Blank^0 / writer.interblocksep * Block)^0 *
+                              (Blank^0 / function() return writer.interblocksep end * Block)^0 *
                               Blank^0 *
                               eof,
 
@@ -850,6 +926,7 @@ function M.new(writer, options)
                             + V("Emph")
                             + V("NoteRef")
                             + V("Link")
+                            + V("Image")
                             + V("Code")
                             + V("AutoLinkUrl")
                             + V("AutoLinkEmail")
@@ -867,6 +944,7 @@ function M.new(writer, options)
       Emph                  = Emph,
       NoteRef               = NoteRef,
       Link                  = Link,
+      Image                 = Image,
       Code                  = Code,
       AutoLinkUrl           = AutoLinkUrl,
       AutoLinkEmail         = AutoLinkEmail,
@@ -893,12 +971,16 @@ function M.new(writer, options)
     syntax = options.alter_syntax(syntax)
   end
 
-  blocks = Cs(syntax)
+  blocks = Ct(syntax)
 
   local inlines_t = util.table_copy(syntax)
   inlines_t[1] = "Inlines"
   inlines_t.Inlines = Inline^0 * (spacing^0 * eof / "")
-  inlines = Cs(inlines_t)
+  inlines = Ct(inlines_t)
+
+  inlines_no_link_t = util.table_copy(inlines_t)
+  inlines_no_link_t.Link = fail
+  inlines_no_link = Ct(inlines_no_link_t)
 
   ------------------------------------------------------------------------------
   -- Exported conversion function
@@ -908,7 +990,7 @@ function M.new(writer, options)
   -- and tabs are assumed to be expanded.
   return function(inp)
       references = options.references or {}
-      lpegmatch(referenceparser,inp)
+      -- lpegmatch(referenceparser,inp)
       if options.pandoc_title_blocks then
         local title, authors, date, rest = lpegmatch(pandoc_title_block, inp)
         writer.set_metadata("title",title)
@@ -916,9 +998,8 @@ function M.new(writer, options)
         writer.set_metadata("date",date)
         inp = rest
       end
-      local result = writer.start_document() .. parse_blocks(inp)
-                       .. writer.stop_document()
-      return result, writer.get_metadata()
+      local result = { writer.start_document(), parse_blocks(inp), writer.stop_document() }
+      return rope_to_string(result), writer.get_metadata()
   end
 
 end

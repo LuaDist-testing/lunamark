@@ -1,9 +1,17 @@
+-- This file was automatically generated for the LuaDist project.
+
 package = "lunamark"
-version = "0.2-1"
+version = "0.3-1"
+-- LuaDist source
 source = {
-  url = "git://github.com/jgm/lunamark.git",
-  branch = "0.2",
+  tag = "0.3-1",
+  url = "git://github.com/LuaDist-testing/lunamark.git"
 }
+-- Original source
+-- source = {
+--   url = "git://github.com/jgm/lunamark.git",
+--   tag = "0.3",
+-- }
 description = {
    summary = "General markup format converter using lpeg.",
    detailed = [[
@@ -53,4 +61,3 @@ build = {
        },
    }
 }
-

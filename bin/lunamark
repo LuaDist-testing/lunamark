@@ -161,6 +161,16 @@ environment variable `LUNAMARK_EXTENSIONS` (see ENVIRONMENT below).
 
         content starts here...
 
+`(-) require_blank_before_blockquote`
+:   Require a blank line between a paragraph and a following blockquote.
+
+`(-) require_blank_before_header`
+:   Require a blank line between a paragraph and a following header.
+
+`(-) hash_enumerators`
+:   Allow `#` instead of a digit for an ordered list enumerator
+    (equivalent to `1`).
+
 # TEMPLATES
 
 By default, lunamark will produce a fragment.  If the
@@ -254,8 +264,8 @@ local function ensure_one_of(optval,s,ary)
 end
 
 local version = [[
-lunamark 0.2
-Copyright (C) 2009-2011 John MacFarlane
+lunamark 0.3
+Copyright (C) 2009-2012 John MacFarlane
 ]]
 
 local usage = [[
@@ -327,7 +337,7 @@ ensure_one_of("--to,-t", to,
 local reader = lunamark.reader.markdown
 
 local extensions = {  -- defaults
-  containers = false,
+  containers = (to == "docbook" or to == "dzslides"),
   slides = false,
   startnum = false,
   smart = false,
@@ -336,6 +346,9 @@ local extensions = {  -- defaults
   definition_lists = false,
   lua_metadata = false,
   pandoc_title_blocks = false,
+  require_blank_before_blockquote = false,
+  require_blank_before_header = false,
+  hash_enumerators = false,
 }
 
 if optarg["0"] then

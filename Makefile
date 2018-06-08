@@ -7,13 +7,14 @@ web=website
 templatesdir=templates
 NUM ?= 25
 PROG ?= bin/lunamark
+TESTOPTS ?= --tidy
 
 all:
 	@echo Targets: test bench docs run-code-examples install clean
 
 .PHONY: test bench docs clean run-code-examples install website
 test:
-	LUNAMARK_EXTENSIONS="" bin/shtest -p ${PROG} ${OPTS}
+	LUNAMARK_EXTENSIONS="" bin/shtest ${TESTOPTS} -p ${PROG} ${OPTS}
 
 ${benchtext}:
 	for i in tests/Markdown_1.0.3/*.test; do sed -e '1,/<<</d;/>>>/,$$d' "$$i" >> $@; echo >> $@.txt; done
@@ -28,6 +29,14 @@ ${testfile}: ${benchtext}
 
 bench: ${testfile}
 	time -p ${PROG} < ${testfile} > /dev/null
+
+prof:
+	lua -luatrace.profile ${PROG} ${benchtext} >/dev/null
+
+coverage:
+	-rm luacov.stats.out ; \
+	LUNAMARK_EXTENSIONS="" bin/shtest ${TESTOPTS} -p "lua -lluacov ${PROG}" ${OPTS} ; \
+	luacov
 
 %.1: bin/%
 	sed '1,/^@startman/d;/^@stopman/,$$d' $< | bin/lunamark -Xdefinition_lists,notes,-smart -t man -s -d section=1,title=$(subst bin/,,$<),left_footer="${version}",date="${date}" -o $@
