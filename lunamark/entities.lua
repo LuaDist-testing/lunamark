@@ -5,8 +5,22 @@
 
 local M = {}
 
-local bit = require("bit32")
-local band, bor, rshift = bit.band, bit.bor, bit.arshift
+local utf8_char do
+  if utf8 then
+    utf8_char = utf8.char
+  elseif pcall(require, "compat53.module") then
+    local utf8 = require "compat53.module".utf8
+    utf8_char = utf8.char
+  elseif pcall(require, "lua-utf8") then -- try luautf8
+    local luautf8 = require("lua-utf8")
+    utf8_char = luautf8.char
+  elseif pcall(require, "unicode") then -- try slnunicode
+    local slnunicode = require "unicode"
+    utf8_char = slnunicode.utf8.char
+  else
+    error "no unicode library found"
+  end
+end
 
 local character_entities = {
   ["quot"] = 0x0022,
@@ -260,54 +274,23 @@ local character_entities = {
   ["diams"] = 0x2666,
 }
 
-local function utf8encode(c)
-   if c < 0x80 then
-     return string.char(band(c,0x7F))
-   elseif c < 0x0800 then
-     return string.char(
-              bor(band(rshift(c, 6), 0x1F), 0xC0),
-              bor(band(c, 0x3F), 0x80))
-   elseif c < 0x010000 then
-     return string.char(
-              bor(band(rshift(c,12), 0x0F), 0xE0),
-              bor(band(rshift(c,6), 0x3F), 0x80),
-              bor(band(c, 0x3F), 0x80))
-   elseif c < 0x110000 then
-     return string.char(
-              bor(band(rshift(c,18), 0x07), 0xF0),
-              bor(band(rshift(c,12), 0x3F), 0x80),
-              bor(band(rshift(c,6) , 0x3F), 0x80),
-              bor(band(c, 0x3F), 0x80))
-   else
-     error("Encountered unicode character above 0x110000")
-   end
-end
-
-local function toutf8(n)
-  if n then
-    return utf8encode(n)
-  else
-    return "?"
-  end
-end
-
 --- Given a string of decimal digits, returns a UTF-8 encoded
 -- string encoding a unicode character.
 function M.dec_entity(s)
-  return toutf8(tonumber(s))
+  return utf8_char(tonumber(s))
 end
 
 --- Given a string of hexadecimal digits, returns a UTF-8 encoded
 -- string encoding a unicode character.
 function M.hex_entity(s)
-  return toutf8(tonumber("0x"..s))
+  return utf8_char(tonumber("0x"..s))
 end
 
 --- Given a character entity name (like `ouml`), returns a UTF-8 encoded
 -- string encoding a unicode character.
 function M.char_entity(s)
   local n = character_entities[s]
-  return toutf8(n)
+  return utf8_char(n)
 end
 
 return M

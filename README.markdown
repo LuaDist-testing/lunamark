@@ -41,7 +41,7 @@ Lunamark's markdown parser currently supports a number of extensions
   - Pandoc-style title blocks
   - Flexible metadata using lua declarations
 
-See the [lunamark man page](lunamark.1.html) for a complete list.
+See the [lunamark(1)] man page for a complete list.
 
 It is very easy to extend the library by modifying the writers,
 adding new writers, and even modifying the markdown parser. Some
@@ -58,6 +58,7 @@ concatenated together 25 times.
 
          0.04s   sundown
          0.15s   discount
+    ->   0.56s   lunamark + luajit
          0.80s   peg-markdown
     ->   0.97s   lunamark
          4.05s   PHP Markdown
@@ -67,8 +68,18 @@ concatenated together 25 times.
 
 # Installing
 
-You can install the latest development version of
-lunamark using [luarocks](http://www.luarocks.org):
+If you want a standalone version of lunamark that doesn't
+depend on lua or other lua modules being installed on
+your system, just do
+
+    make standalone
+
+Your executable will be created in the `standalone`
+directory.
+
+If you are a lua user, you will probably prefer to install
+lunamark using luarocks.  You can install the latest development
+version this way:
 
     git clone http://github.com/jgm/lunamark.git
     cd lunamark
@@ -140,6 +151,9 @@ Lunamark currently fails four of the PHP Markdown tests:
     the markdown spec, so in my view the PHP test suite is not normative here;
     I think lunamark's behavior is perfectly reasonable, and I see no reason
     to change.
+
+The `make test` target only runs the Markdown and lunamark
+tests, skipping the PHP Markdown tests.
 
 # Authors
 
