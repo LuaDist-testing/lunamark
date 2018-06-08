@@ -23,7 +23,7 @@ and three orders of magnitude faster than `markdown.lua`.
 
 [Source code repository]: https://github.com/jgm/lunamark
 [Issue tracker]: https://github.com/jgm/lunamark/issues
-[Website]: http:jgm.github.com/lunamark
+[Website]: http://jgm.github.com/lunamark
 [API documentation]: http://jgm.github.com/lunamark/doc/
 [lunamark(1)]: http://jgm.github.com/lunamark/lunamark.1.html
 [lunadoc(1)]: http://jgm.github.com/lunamark/lunadoc.1.html
@@ -39,6 +39,8 @@ Lunamark's markdown parser currently supports a number of extensions
   - Footnotes
   - Definition lists
   - Pandoc-style title blocks
+  - Pandoc-style citations
+  - Fenced code blocks
   - Flexible metadata using lua declarations
 
 See the [lunamark(1)] man page for a complete list.

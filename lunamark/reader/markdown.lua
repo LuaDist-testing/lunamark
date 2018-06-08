@@ -51,6 +51,41 @@ local function normalize_tag(tag)
   return utf8_lower(gsub(rope_to_string(tag), "[ \n\r\t]+", " "))
 end
 
+------------------------------------------------------------------------------
+-- Character parsers
+------------------------------------------------------------------------------
+
+local percent                = P("%")
+local at                     = P("@")
+local comma                  = P(",")
+local asterisk               = P("*")
+local dash                   = P("-")
+local plus                   = P("+")
+local underscore             = P("_")
+local period                 = P(".")
+local hash                   = P("#")
+local ampersand              = P("&")
+local backtick               = P("`")
+local less                   = P("<")
+local more                   = P(">")
+local space                  = P(" ")
+local squote                 = P("'")
+local dquote                 = P('"')
+local lparent                = P("(")
+local rparent                = P(")")
+local lbracket               = P("[")
+local rbracket               = P("]")
+local circumflex             = P("^")
+local slash                  = P("/")
+local equal                  = P("=")
+local colon                  = P(":")
+local semicolon              = P(";")
+local exclamation            = P("!")
+local tilde                  = P("~")
+local tab                    = P("\t")
+local newline                = P("\n")
+local tightblocksep          = P("\001")
+
 --- Create a new markdown parser.
 --
 -- *   `writer` is a writer table (see [lunamark.writer.generic]).
@@ -87,6 +122,12 @@ end
 --     `definition_lists`
 --     :   Enable definition lists as in pandoc.
 --
+--     `citations`
+--     :   Enable citations as in pandoc.
+--
+--     `fenced_code_blocks`
+--     :   Enable fenced code blocks.
+--
 --     `pandoc_title_blocks`
 --     :   Parse pandoc-style title block at the beginning of document:
 --
@@ -110,6 +151,10 @@ end
 --     `require_blank_before_header`
 --     :   Require a blank line between a paragraph and a following
 --         header.
+--
+--     `require_blank_before_fenced_code_block`
+--     :   Require a blank line between a paragraph and a following
+--         fenced code block.
 --
 --     `hash_enumerators`
 --     :   Allow `#` instead of a digit for an ordered list enumerator
@@ -142,33 +187,27 @@ function M.new(writer, options)
   local blocks
   local inlines
   local inlines_no_link
+  local inlines_nbsp
 
-  local parse_blocks =
-    function(str)
-      local res = lpegmatch(blocks, str)
-      if res == nil
-        then error(format("parse_blocks failed on:\n%s", str:sub(1,20)))
-        else return res
-        end
+  local function create_parser(name, grammar)
+    return function(str)
+      local res = lpeg.match(grammar(), str)
+      if res == nil then
+        error(format("%s failed on:\n%s", name, str:sub(1,20)))
+      else
+        return res
+      end
     end
+  end
 
-  local parse_inlines =
-    function(str)
-      local res = lpegmatch(inlines, str)
-      if res == nil
-        then error(format("parse_inlines failed on:\n%s", str:sub(1,20)))
-        else return res
-        end
-    end
-
-  local parse_inlines_no_link =
-    function(str)
-      local res = lpegmatch(inlines_no_link, str)
-      if res == nil
-        then error(format("parse_inlines_no_link failed on:\n%s", str:sub(1,20)))
-        else return res
-        end
-    end
+  local parse_blocks = create_parser("parse_blocks",
+    function() return blocks end)
+  local parse_inlines = create_parser("parse_inlines",
+    function() return inlines end)
+  local parse_inlines_no_link = create_parser("parse_inlines_no_link",
+    function() return inlines_no_link end)
+  local parse_inlines_nbsp = create_parser("parse_inlines_nbsp",
+    function() return inlines_nbsp end)
 
   local parse_markdown
 
@@ -176,36 +215,12 @@ function M.new(writer, options)
   -- Generic parsers
   ------------------------------------------------------------------------------
 
-  local percent                = P("%")
-  local asterisk               = P("*")
-  local dash                   = P("-")
-  local plus                   = P("+")
-  local underscore             = P("_")
-  local period                 = P(".")
-  local hash                   = P("#")
-  local ampersand              = P("&")
-  local backtick               = P("`")
-  local less                   = P("<")
-  local more                   = P(">")
-  local space                  = P(" ")
-  local squote                 = P("'")
-  local dquote                 = P('"')
-  local lparent                = P("(")
-  local rparent                = P(")")
-  local lbracket               = P("[")
-  local rbracket               = P("]")
-  local circumflex             = P("^")
-  local slash                  = P("/")
-  local equal                  = P("=")
-  local colon                  = P(":")
-  local semicolon              = P(";")
-  local exclamation            = P("!")
-
   local digit                  = R("09")
   local hexdigit               = R("09","af","AF")
   local letter                 = R("AZ","az")
   local alphanumeric           = R("AZ","az","09")
   local keyword                = letter * alphanumeric^0
+  local internal_punctuation   = S(":;,.#$%&-+?<>~/")
 
   local doubleasterisks        = P("**")
   local doubleunderscores      = P("__")
@@ -214,22 +229,19 @@ function M.new(writer, options)
   local any                    = P(1)
   local fail                   = any - 1
 
-  local escapable              = S("\\`*_{}[]()+_.!<>#-~:^")
+  local escapable              = S("\\`*_{}[]()+_.!<>#-~:^@;")
   local anyescaped             = P("\\") / "" * escapable
                                + any
 
-  local tab                    = P("\t")
   local spacechar              = S("\t ")
   local spacing                = S(" \n\r\t")
-  local newline                = P("\n")
   local nonspacechar           = any - spacing
-  local tightblocksep          = P("\001")
 
   local specialchar
   if options.smart then
-    specialchar                = S("*_`&[]<!\\'\"-.")
+    specialchar                = S("*_`&[]<!\\'\"-.@")
   else
-    specialchar                = S("*_`&[]<!\\")
+    specialchar                = S("*_`&[]<!\\-@")
   end
 
   local normalchar             = any -
@@ -272,7 +284,7 @@ function M.new(writer, options)
                      + space * bulletchar * #spacing * (tab + space^-2)
                      + space * space * bulletchar * #spacing * (tab + space^-1)
                      + space * space * space * bulletchar * #spacing
-                     ) * -bulletchar
+                     )
 
   local dig
   if options.hash_enumerators then
@@ -307,6 +319,39 @@ function M.new(writer, options)
                     + (backtick^1 - closeticks)
 
   local inticks     = openticks * space^-1 * C(intickschar^1) * closeticks
+
+  -----------------------------------------------------------------------------
+  -- Parsers used for fenced code blocks
+  -----------------------------------------------------------------------------
+
+  local function captures_geq_length(s,i,a,b)
+    return #a >= #b and i
+  end
+
+  local infostring     = (linechar - (backtick + space^1 * newline))^0
+
+  local fenceindent
+  local function fencehead(char)
+    return               C(nonindentspace) / function(s) fenceindent = #s end
+                       * Cg(char^3, "fencelength")
+                       * optionalspace * C(infostring) * optionalspace
+                       * newline + eof
+  end
+
+  local function fencetail(char)
+    return               nonindentspace
+                       * Cmt(C(char^3) * Cb("fencelength"),
+                             captures_geq_length)
+                       * optionalspace * (newline + eof)
+  end
+
+  local function fencedline(char)
+    return               C(line - fencetail(char))
+                       / function(s)
+                           return s:gsub("^" .. string.rep(" ?",
+                             fenceindent), "")
+                         end
+  end
 
   -----------------------------------------------------------------------------
   -- Parsers used for markdown tags and links
@@ -358,6 +403,72 @@ function M.new(writer, options)
                       + Cc("")
 
   ------------------------------------------------------------------------------
+  -- Citations
+  ------------------------------------------------------------------------------
+
+  local citation_name = Cs(dash^-1) * at
+                      * Cs(alphanumeric
+                          * (alphanumeric + internal_punctuation
+                              - comma - semicolon)^0)
+
+  local citation_body_prenote
+                      = Cs((alphanumeric^1
+                           + bracketed
+                           + inticks
+                           + (anyescaped
+                               - (rbracket + blankline^2))
+                           - (spnl * dash^-1 * at))^0)
+
+  local citation_body_postnote
+                      = Cs((alphanumeric^1
+                           + bracketed
+                           + inticks
+                           + (anyescaped
+                               - (rbracket + semicolon + blankline^2))
+                           - (spnl * rbracket))^0)
+
+  local citation_body_chunk
+                      = citation_body_prenote
+                      * spnl * citation_name
+                      * (comma * spnl)^-1
+                      * citation_body_postnote
+
+  local citation_body = citation_body_chunk
+                      * (semicolon * spnl * citation_body_chunk)^0
+
+  local citation_headless_body
+                      = Cs((alphanumeric^1
+                           + bracketed
+                           + inticks
+                           + (anyescaped
+                               - (rbracket + at + semicolon + blankline^2))
+                           - (spnl * rbracket))^0)
+                      * (sp * semicolon * spnl * citation_body_chunk)^0
+
+  local function citations(text_cites, raw_cites)
+      local function normalize(str)
+          if str == "" then
+              str = nil
+          else
+              str = (options.citation_nbsps and parse_inlines_nbsp or
+                parse_inlines)(str)
+          end
+          return str
+      end
+
+      local cites = {}
+      for i = 1,#raw_cites,4 do
+          cites[#cites+1] = {
+              prenote = normalize(raw_cites[i]),
+              suppress_author = raw_cites[i+1] == "-",
+              name = writer.string(raw_cites[i+2]),
+              postnote = normalize(raw_cites[i+3]),
+          }
+      end
+      return writer.citations(text_cites, cites)
+  end
+
+  ------------------------------------------------------------------------------
   -- Footnotes
   ------------------------------------------------------------------------------
 
@@ -374,7 +485,7 @@ function M.new(writer, options)
       if found then
         return writer.note(parse_blocks(found))
       else
-        return {"[^", ref, "]"}
+        return {"[", parse_inlines("^" .. ref), "]"}
       end
     end
   end
@@ -596,6 +707,7 @@ function M.new(writer, options)
   local bqstart      = more
   local headerstart  = hash
                      + (line * (equal^1 + dash^1) * optionalspace * newline)
+  local fencestart   = fencehead(backtick) + fencehead(tilde)
 
   if options.require_blank_before_blockquote then
     bqstart = fail
@@ -605,17 +717,38 @@ function M.new(writer, options)
     headerstart = fail
   end
 
+  if not options.fenced_code_blocks or
+    options.blank_before_fenced_code_blocks then
+    fencestart = fail
+  end
+
   local Endline   = newline * -( -- newline, but not before...
                         blankline -- paragraph break
                       + tightblocksep  -- nested list
                       + eof       -- end of document
                       + bqstart
                       + headerstart
+                      + fencestart
                     ) * spacechar^0 / writer.space
 
   local Space     = spacechar^2 * Endline / writer.linebreak
                   + spacechar^1 * Endline^-1 * eof / ""
                   + spacechar^1 * Endline^-1 * optionalspace / writer.space
+
+  local NonbreakingEndline
+                  = newline * -( -- newline, but not before...
+                        blankline -- paragraph break
+                      + tightblocksep  -- nested list
+                      + eof       -- end of document
+                      + bqstart
+                      + headerstart
+                      + fencestart
+                    ) * spacechar^0 / writer.nbsp
+
+  local NonbreakingSpace
+                  = spacechar^2 * Endline / writer.linebreak
+                  + spacechar^1 * Endline^-1 * eof / ""
+                  + spacechar^1 * Endline^-1 * optionalspace / writer.nbsp
 
   -- parse many p between starter and ender
   local function between(p, starter, ender)
@@ -669,6 +802,26 @@ function M.new(writer, options)
 
   local Image         = DirectImage + IndirectImage
 
+  local TextCitations = Ct(Cc("")
+                      * citation_name
+                      * ((spnl
+                           * lbracket
+                           * citation_headless_body
+                           * rbracket) + Cc(""))) /
+                        function(raw_cites)
+                            return citations(true, raw_cites)
+                        end
+
+  local ParenthesizedCitations
+                      = Ct(lbracket
+                      * citation_body
+                      * rbracket) /
+                        function(raw_cites)
+                            return citations(false, raw_cites)
+                        end
+
+  local Citations     = TextCitations + ParenthesizedCitations
+
   -- avoid parsing long strings of * or _ as emph/strong
   local UlOrStarLine  = asterisk^4 + underscore^4 / writer.string
 
@@ -691,6 +844,24 @@ function M.new(writer, options)
   local Verbatim       = Cs( (blanklines
                            * ((indentedline - blankline))^1)^1
                            ) / expandtabs / writer.verbatim
+
+  local TildeFencedCodeBlock
+                       = fencehead(tilde)
+                       * Cs(fencedline(tilde)^0)
+                       * fencetail(tilde)
+
+  local BacktickFencedCodeBlock
+                       = fencehead(backtick)
+                       * Cs(fencedline(backtick)^0)
+                       * fencetail(backtick)
+
+  local FencedCodeBlock
+                       = (TildeFencedCodeBlock + BacktickFencedCodeBlock)
+                       / function(infostring, code)
+                             return writer.fenced_code(
+                                 expandtabs(code),
+                                 writer.string(infostring))
+                         end
 
   -- strip off leading > and indents, and run through blocks
   local Blockquote     = Cs((
@@ -902,6 +1073,7 @@ function M.new(writer, options)
 
       Block                 = V("Blockquote")
                             + V("Verbatim")
+                            + V("FencedCodeBlock")
                             + V("HorizontalRule")
                             + V("BulletList")
                             + V("OrderedList")
@@ -913,6 +1085,7 @@ function M.new(writer, options)
 
       Blockquote            = Blockquote,
       Verbatim              = Verbatim,
+      FencedCodeBlock       = FencedCodeBlock,
       HorizontalRule        = HorizontalRule,
       BulletList            = BulletList,
       OrderedList           = OrderedList,
@@ -929,6 +1102,7 @@ function M.new(writer, options)
                             + V("Strong")
                             + V("Emph")
                             + V("NoteRef")
+                            + V("Citations")
                             + V("Link")
                             + V("Image")
                             + V("Code")
@@ -947,6 +1121,7 @@ function M.new(writer, options)
       Strong                = Strong,
       Emph                  = Emph,
       NoteRef               = NoteRef,
+      Citations             = Citations,
       Link                  = Link,
       Image                 = Image,
       Code                  = Code,
@@ -961,6 +1136,14 @@ function M.new(writer, options)
 
   if not options.definition_lists then
     syntax.DefinitionList = fail
+  end
+
+  if not options.fenced_code_blocks then
+    syntax.FencedCodeBlock = fail
+  end
+
+  if not options.citations then
+    syntax.Citations = fail
   end
 
   if not options.notes then
@@ -985,6 +1168,11 @@ function M.new(writer, options)
   local inlines_no_link_t = util.table_copy(inlines_t)
   inlines_no_link_t.Link = fail
   inlines_no_link = Ct(inlines_no_link_t)
+
+  local inlines_nbsp_t = util.table_copy(inlines_t)
+  inlines_nbsp_t.Endline = NonbreakingEndline
+  inlines_nbsp_t.Space = NonbreakingSpace
+  inlines_nbsp = Ct(inlines_nbsp_t)
 
   ------------------------------------------------------------------------------
   -- Exported conversion function

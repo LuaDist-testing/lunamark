@@ -17,6 +17,8 @@ function M.new(options)
 
   Docbook.linebreak = "<literallayout>&#xA;</literallayout>"
 
+  Docbook.nbsp = "&nbsp;"
+
   function Docbook.code(s)
     return {"<literal>",Docbook.string(s),"</literal>"}
   end
@@ -91,6 +93,8 @@ function M.new(options)
   function Docbook.verbatim(s)
     return {"<programlisting>",Docbook.string(s),"</programlisting>"}
   end
+
+  Docbook.fenced_code = Docbook.verbatim
 
   function Docbook.stop_document()
     local stop = Docbook.stop_section(1) -- close section containers

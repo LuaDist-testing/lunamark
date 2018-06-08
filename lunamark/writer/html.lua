@@ -36,6 +36,7 @@ function M.new(options)
 
   Html.container = "div"
   Html.linebreak = "<br/>"
+  Html.nbsp = "&nbsp;"
 
   function Html.code(s)
     return {"<code>", Html.string(s), "</code>"}
@@ -101,6 +102,15 @@ function M.new(options)
 
   function Html.verbatim(s)
     return {"<pre><code>", Html.string(s), "</code></pre>"}
+  end
+
+  function Html.fenced_code(s,i)
+    if i ~= "" then
+      return {'<pre><code class="language-', i:match("[^ ]*"),
+        '">', Html.string(s), "</code></pre>"}
+    else
+      return Html.verbatim(s)
+    end
   end
 
   function Html.header(s,level)

@@ -28,8 +28,7 @@ can be turned on or off individually):
   - Definition lists
   - Metadata
   - Pandoc title blocks
-  - Pandoc citations
-  - Fenced code blocks
+  - Citations using citeproc
 
 More extensions will be supported in later versions.
 
@@ -50,10 +49,9 @@ It is slightly faster than the author's own C library
 `--extensions,-X` *extensions*
 :   Use the specified syntax extensions in parsing markdown.
     *extensions* is a comma-separated list of extensions, each optionally
-    prefixed with `-` (disable), `+` (enable), or followed by
-    `=parameter` (enable and parametrize).  See EXTENSIONS, below, for
-    a list of supported extensions.  The keyword 'all' may also be
-    used, to set all extensions simultaneously.
+    prefixed by `+` (enable) or `-` (disable).  See EXTENSIONS, below, for
+    a list of supported extensions.  The keyword 'all' may also be used,
+    to set all extensions simultaneously.
 `--output,-o` *file*
 :   Write output to *file*.
 `--standalone,-s`
@@ -137,72 +135,6 @@ environment variable `LUNAMARK_EXTENSIONS` (see ENVIRONMENT below).
 
         :   a ruby build system.
 
-`(-) citations`
-:   Pandoc citations. Citations go inside square brackets and are
-    separated by semicolons. Each citation must have a key, composed
-    of `@` + the citation identifier from the database, and may
-    optionally have a prenote, and a postnote. The citation key must
-    begin with a letter, digit, or `_`, and may contain alphanumerics,
-    `_`, and internal punctuation characters (`:.#$%&-+?<>~/`).
-    Examples:
-
-        Blah blah [see @doe99, pp. 33-35; also @smith04, chap. 1].
-
-        Blah blah [@doe99, pp. 33-35, 38-39 and *passim*].
-
-        Blah blah [@smith04; @doe99].
-
-    A minus sign (`-`) before the `@` will suppress mention of the
-    author in the citation. This can be useful when the author is
-    already mentioned in the text:
-
-        Smith says blah [-@smith04].
-
-    You can also write an in-text citation, as follows:
-
-        @smith04 says blah.
-
-        @smith04 [p. 33] says blah.
-
-    Some writers will accept finer-grained configuration of the
-    citations extension via `-X citations=configuration`.
-
-`(+) citation_nbsps`
-:   Convert any spacing in citation prenotes and postnotes into
-    non-breaking spaces.
-
-`(-) fenced_code_blocks`
-:   Fenced code blocks. A code fence is a sequence of at least three
-    consecutive backtick characters (`) or tildes (~). (Tildes and
-    backticks cannot be mixed.) A fenced code block begins with a code
-    fence, indented no more than three spaces. The line with the
-    opening code fence may optionally contain some text following the
-    code fence; this is trimmed of leading and trailing spaces and
-    called the info string. The info string may not contain any
-    backtick characters.
-
-    The content of the code block consists of all subsequent lines,
-    until a closing code fence of the same type as the code block
-    began with (backticks or tildes), and with at least as many
-    backticks or tildes as the opening code fence. If the leading code
-    fence is indented N spaces, then up to N spaces of indentation are
-    removed from each line of the content (if present). (If a content
-    line is not indented, it is preserved unchanged. If it is indented
-    less than N spaces, all of the indentation is removed.)
-
-    The closing code fence may be indented up to three spaces, and may
-    be followed only by spaces, which are ignored. Example:
-
-        ``` lua
-        local function fac(n)
-          if n <= 0
-            return 1
-          else
-            return n * fac(n)
-          end
-        end
-        ```````
-
 `(-) lua_metadata`
 :   Lua metadata.  An HTML comment beginning `<!--@` and containing
     lua variable declarations is treated as metadata.  Note that strings
@@ -230,15 +162,51 @@ environment variable `LUNAMARK_EXTENSIONS` (see ENVIRONMENT below).
 
         content starts here...
 
+`(-) citeproc`
+:   Automatic citations as in pandoc.  Requires installation of
+    the standalone `citeproc` executable.  The bibliography
+    or bibliographies must be specified using the `bibliography`
+    variable or metadata.  (The bibliography can be
+    MODS, BibTeX, BibLaTeX, RIS, EndNote, EndNote XML, ISI,
+    MEDLINE, Copac, or JSON citeproc.)  The CSL stylesheet must
+    be specified using the `csl` variable or metadata. A
+    primer on creating and modifying CSL styles can be found
+    at <http://citationstyles.org/downloads/primer.html>.
+    A repository of CSL styles can be found at
+    <https://github.com/citation-style-language/styles>. See also
+    <http://zotero.org/styles> for easy browsing.
+
+    Citations go inside square brackets and are separated by semicolons.
+    Each citation must have a key, composed of '@' + the citation
+    identifier from the database, and may optionally have a prefix,
+    a locator, and a suffix.  Here are some examples:
+
+        Blah blah [see @doe99, pp. 33-35; also @smith04, ch. 1].
+
+        Blah blah [@doe99, pp. 33-35, 38-39 and *passim*].
+
+        Blah blah [@smith04; @doe99].
+
+    A minus sign (`-`) before the `@` will suppress mention of
+    the author in the citation.  This can be useful when the
+    author is already mentioned in the text:
+
+        Smith says blah [-@smith04].
+
+    You can also write an in-text citation, as follows:
+
+        @smith04 says blah.
+
+        @smith04 [p. 33] says blah.
+
+    If the style calls for a list of works cited, it will replace the
+    template variable `references`.
+
 `(-) require_blank_before_blockquote`
 :   Require a blank line between a paragraph and a following blockquote.
 
 `(-) require_blank_before_header`
 :   Require a blank line between a paragraph and a following header.
-
-`(-) require_blank_before_fenced_code_block`
-:   Require a blank line between a paragraph and a following fenced
-    code block.
 
 `(-) hash_enumerators`
 :   Allow `#` instead of a digit for an ordered list enumerator
@@ -337,8 +305,8 @@ local function ensure_one_of(optval,s,ary)
 end
 
 local version = [[
-lunamark 0.5.0
-Copyright (C) 2009-2016 John MacFarlane
+lunamark 0.2
+Copyright (C) 2009-2011 John MacFarlane
 ]]
 
 local usage = [[
@@ -362,25 +330,15 @@ LAYOUT can be default, compact (no unnecessary blank lines), or
 minimize (no unnecessary blank space).
 
 EXTENSIONS is a comma-separated list of extensions, each optionally prefixed
-with - (disable), + (enable), or followed by `=parameter` (enable and
-parametrize). The following extensions are defined, with the default setting
-given in parentheses:
-  (-) containers           Put sections in containers (e.g. div or section tags)
-  (-) slides               Like containers, but do not nest them
-  (-) startnum             Start number of an ordered list is significant
-  (-) smart                Smart typography (quotes, dashes, ellipses)
-  (-) preserve_tabs        Don't expand tabs to spaces
-  (-) notes                Footnotes
-  (-) definition_lists     Definition lists
-  (-) citations            Citations
-  (+) citation_nbsps       Turn spacing into non-breaking spaces in citations
-  (-) fenced_code_blocks   Fenced code blocks
-  (-) lua_metadata         Lua metadata
-  (-) pandoc_title_blocks  Pandoc style title blocks
-  (-) hash_enumerators     # may be used as ordered list enumerator
-  (-) require_blank_before_blockquote
-  (-) require_blank_before_header
-  (-) require_blank_before_fenced_code_block
+by + (enable) or - (disable).  The following extensions are defined,
+with the default setting given in parentheses:
+  (-) containers        Put sections in containers (e.g. div or section tags)
+  (-) slides            Like containers, but do not nest them
+  (-) startnum          Start number of an ordered list is significant
+  (-) smart             Smart typography (quotes, dashes, ellipses)
+  (-) preserve_tabs     Don't expand tabs to spaces
+  (-) notes             Footnotes
+  (-) definition_lists  Definition lists
 The keyword 'all' may also be used, to set all extensions simultaneously.
 Setting the environment variable LUNAMARK_EXTENSIONS can change the
 defaults.
@@ -420,21 +378,18 @@ ensure_one_of("--to,-t", to,
 local reader = lunamark.reader.markdown
 
 local extensions = {  -- defaults
-  containers = (to == "docbook" or to == "dzslides"),
+  containers = false,
   slides = false,
   startnum = false,
   smart = false,
   preserve_tabs = false,
   notes = false,
-  citations = false,
-  citation_nbsps = true,
   definition_lists = false,
-  fenced_code_blocks = false,
   lua_metadata = false,
   pandoc_title_blocks = false,
+  citeproc = false,
   require_blank_before_blockquote = false,
   require_blank_before_header = false,
-  require_blank_before_fenced_code_block = false,
   hash_enumerators = false,
 }
 
@@ -444,19 +399,12 @@ end
 
 local default_extensions = os.getenv("LUNAMARK_EXTENSIONS") or ""
 local extensions_opt = default_extensions .. "," .. (optarg.X or "")
-for x in extensions_opt:gmatch("[%+%-]?[%a_=]+") do
+for x in extensions_opt:gmatch("[%+%-]?[%a_]+") do
   local val = true
-  if x:find("=") then
-    x, val = x:match("([%+%-]?[%a_]+)=([%a_]+)")
-    if x:find("^[%+%-]") then
-      lunamark.util.err("You may either:\n" ..
-        " - disable an extension (-" .. x:sub(2) .. "),\n" ..
-        " - enable an extension (+" .. x:sub(2) .. "), or\n" ..
-        " - enable and parametrize an extension (" .. x:sub(2) .. "=parameter).")
-    end
-  elseif x:find("^%+") then
+  if x:sub(1,1) == "+" then
+    val = true
     x = x:sub(2)
-  elseif x:find("^%-") then
+  elseif x:sub(1,1) == "-" then
     val = false
     x = x:sub(2)
   end
@@ -464,6 +412,8 @@ for x in extensions_opt:gmatch("[%+%-]?[%a_=]+") do
     for k,_ in pairs(extensions) do
       extensions[k] = val
     end
+  elseif type(extensions[x]) ~= "boolean" then
+    lunamark.util.err("Unrecognized extension: " .. x, 15)
   else
     extensions[x] = val
   end
